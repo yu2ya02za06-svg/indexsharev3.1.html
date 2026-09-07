@@ -1,0 +1,1120 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>空き家調査GIS</title>
+
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="空き家調査">
+  <link rel="apple-touch-icon" href="https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png">
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/shpjs@latest/dist/shp.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+  <style>
+    body, html { margin: 0; padding: 0; height: 100%; font-family: sans-serif; background: #f0f0f0; transition: font-size 0.2s; }
+    #map { height: 100vh; width: 100vw; z-index: 1; }
+    
+    /* 🚀 OP画面 */
+    #op-screen {
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      background: #f0f0f0; z-index: 3000; display: flex; justify-content: center; align-items: center;
+    }
+    .op-content {
+      background: white; padding: 30px; border-radius: 12px; box-shadow: 0 10px 20px rgba(0,0,0,0.2); width: 340px; text-align: center;
+    }
+    .op-content h2 { margin-top: 0; color: #333; font-size: 22px; }
+    .dl-checkbox-label { display: block; margin-top: 15px; font-size: 14px; color: #333; cursor: pointer; text-align: left; }
+    .dl-checkbox-label input { width: 16px; height: 16px; vertical-align: middle; margin-right: 6px; cursor: pointer; }
+    
+    /* 🍞 通知トースト */
+    #toast {
+      position: fixed; top: 20px; right: 20px; background: rgba(40,167,69,0.95); color: white; 
+      padding: 14px 20px; border-radius: 8px; z-index: 4000; font-weight: bold; font-size: 14px;
+      transform: translateX(150%); transition: transform 0.4s ease-out; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+    #toast.show { transform: translateX(0); }
+
+    /* メイン UI */
+    .control-panel {
+      position: absolute; top: 10px; left: 10px; z-index: 1000;
+      background: rgba(255, 255, 255, 0.95); padding: 12px; border-radius: 8px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3); font-size: 13px; width: 260px;
+      transition: width 0.2s, padding 0.2s;
+    }
+    .panel-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; border-bottom: 1px solid #ccc; padding-bottom: 5px; }
+    .panel-header-row h4 { margin: 0; font-size: 15px; }
+    #open-settings-btn { background: none; border: none; font-size: 20px; cursor: pointer; padding: 0; }
+    
+    .file-input-group { margin-bottom: 8px; margin-top: 8px; }
+    .file-input-group label { display: block; font-weight: bold; margin-bottom: 4px; color: #555; }
+    .file-input-group input { width: 100%; font-size: 11px; }
+    
+    .btn { width: 100%; padding: 8px; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; margin-top: 4px; transition: padding 0.2s, font-size 0.2s; }
+    #bulk-link-btn { background: #17a2b8; }
+    #share-cloud-btn { background: #28a745; margin-top: 10px; font-size: 13px; }
+    #export-btn { background: #ffc107; color: #333; margin-top: 4px; font-size: 11px; }
+    #clear-db-btn { background: #dc3545; font-size: 11px; padding: 4px; margin-top: 4px; display: none; }
+    
+    #gps-btn, #add-pin-btn {
+      position: absolute; right: 20px; z-index: 1000; padding: 12px; color: white; border: none;
+      border-radius: 50%; box-shadow: 0 4px 8px rgba(0,0,0,0.3); font-weight: bold; font-size: 13px;
+      transition: padding 0.2s, font-size 0.2s;
+    }
+    #gps-btn { bottom: 20px; background: #007bff; }
+    #add-pin-btn { bottom: 80px; background: #ff9800; }
+    
+    #info-panel {
+      position: absolute; bottom: -100%; left: 0; width: 100%; height: 80vh; background: white;
+      z-index: 1001; transition: bottom 0.25s ease-out; box-shadow: 0 -5px 15px rgba(0,0,0,0.2);
+      border-radius: 16px 16px 0 0; display: flex; flex-direction: column;
+    }
+    .panel-header { padding: 12px 16px; border-bottom: 1px solid #eee; position: relative; }
+    .close-btn { position: absolute; right: 16px; top: 12px; font-size: 20px; color: #999; cursor: pointer; }
+    
+    .tabs { display: flex; width: 100%; border-bottom: 1px solid #ddd; background: #f9f9f9; }
+    .tab { flex: 1; text-align: center; padding: 10px 0; cursor: pointer; color: #666; font-weight: bold; border-bottom: 2px solid transparent; font-size: 13px; transition: font-size 0.2s, padding 0.2s; box-sizing: border-box; }
+    .tab.active { color: #007bff; border-bottom-color: #007bff; }
+    .tab-content { flex: 1; padding: 16px; overflow-y: auto; display: none; }
+    .tab-content.active { display: block; }
+    
+    .input-field { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 10px; font-size: 13px; box-sizing: border-box; transition: padding 0.2s, font-size 0.2s; }
+    .save-btn { width: 100%; padding: 12px; background: #007bff; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; transition: padding 0.2s, font-size 0.2s; }
+    table.excel-table { width: 100%; border-collapse: collapse; font-size: 13px; transition: font-size 0.2s; }
+    table.excel-table th, table.excel-table td { padding: 6px; border: 1px solid #ddd; }
+    table.excel-table th { background: #f0f0f0; width: 35%; }
+    .photo-pair { border: 1px solid #ddd; padding: 10px; margin-bottom: 12px; border-radius: 6px; background: #fff; }
+    .photo-img { max-width: 100%; max-height: 200px; display: block; margin: 0 auto 10px auto; border-radius: 4px; }
+    .camera-btn { display: block; padding: 12px; color: white; text-align: center; border-radius: 6px; font-weight: bold; font-size: 14px; cursor: pointer; box-sizing: border-box; transition: padding 0.2s, font-size 0.2s; }
+    .camera-input { display: none; }
+    .info-label { font-size: 11px; font-weight: bold; display: block; margin-bottom: 4px; transition: font-size 0.2s; }
+
+    /* ⚙️ 設定モーダルのスタイル */
+    #settings-modal {
+      display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(0,0,0,0.5); z-index: 2000; justify-content: center; align-items: center;
+    }
+    .settings-content {
+      background: #fff; padding: 20px; border-radius: 12px; width: 320px; max-width: 90%;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.3); transition: padding 0.2s, width 0.2s;
+    }
+    .settings-row { margin-bottom: 15px; display: flex; align-items: center; font-size: 15px; font-weight: bold; cursor: pointer; }
+    .settings-row input[type="checkbox"] { width: 22px; height: 22px; margin-right: 12px; cursor: pointer; }
+    #settings-dl-map-btn { background: #17a2b8; margin-bottom: 15px; }
+
+    /* 🔒 管理者専用メニュー枠 */
+    .admin-only-setting { 
+      display: none; flex-direction: column; margin-top: 10px; padding: 12px; 
+      background: #fffafb; border: 1px solid #dc3545; border-radius: 6px; 
+    }
+    body.admin-mode .admin-only-setting { display: flex; } /* 管理者モードONで表示 */
+
+    /* 🗑 所見の行削除ボタン */
+    .remove-note-btn {
+      display: none; background: #dc3545; color: white; border: none; border-radius: 4px;
+      width: 32px; height: 32px; margin-left: 8px; cursor: pointer; font-size: 14px;
+      align-items: center; justify-content: center; transition: 0.2s;
+    }
+    body.admin-mode .remove-note-btn { display: flex; } /* 管理者モードONで表示 */
+
+    /* 🌟 文字拡大モード (シニア対応UI) */
+    body.large-text { font-size: 115%; }
+    body.large-text .control-panel { width: 310px; padding: 16px; }
+    body.large-text .panel-header-row h4 { font-size: 18px; }
+    body.large-text #open-settings-btn { font-size: 26px; }
+    body.large-text .file-input-group label { font-size: 15px; margin-bottom: 6px; }
+    body.large-text .file-input-group input { font-size: 14px; padding: 4px; }
+    body.large-text .btn { font-size: 16px; padding: 14px; }
+    body.large-text #share-cloud-btn { font-size: 16px; }
+    body.large-text #export-btn { font-size: 15px; }
+    body.large-text #clear-db-btn { font-size: 14px; padding: 10px; }
+    body.large-text #gps-btn, body.large-text #add-pin-btn { font-size: 16px; padding: 18px; }
+    body.large-text #add-pin-btn { bottom: 95px; }
+    body.large-text .panel-header h3 { font-size: 24px; }
+    body.large-text .panel-header p { font-size: 15px; }
+    body.large-text .close-btn { font-size: 28px; top: 10px; }
+    body.large-text .tab { font-size: 16px; padding: 14px 0; }
+    body.large-text .input-field { font-size: 18px; padding: 12px; }
+    body.large-text table.excel-table { font-size: 16px; }
+    body.large-text table.excel-table th, body.large-text table.excel-table td { padding: 10px; }
+    body.large-text .info-label { font-size: 15px; margin-bottom: 6px; }
+    body.large-text .camera-btn { font-size: 18px; padding: 16px; }
+    body.large-text .save-btn { font-size: 18px; padding: 16px; }
+    body.large-text .settings-content { width: 360px; padding: 25px; }
+    body.large-text .settings-content h3 { font-size: 22px; }
+    body.large-text .settings-row { font-size: 18px; margin-bottom: 20px; }
+    body.large-text .settings-row input[type="checkbox"] { width: 28px; height: 28px; margin-right: 15px; }
+    body.large-text .dl-checkbox-label { font-size: 16px; }
+    body.large-text .dl-checkbox-label input { width: 20px; height: 20px; margin-right: 8px; }
+    body.large-text .mic-btn { font-size: 20px !important; padding: 10px 16px !important; }
+    body.large-text .remove-note-btn { width: 44px; height: 44px; font-size: 18px; }
+  </style>
+</head>
+<body>
+
+  <!-- 🍞 完了通知トースト -->
+  <div id="toast"></div>
+
+  <!-- 🚀 OP画面 -->
+  <div id="op-screen">
+    <div class="op-content">
+      <h2>🌍 初期設定</h2>
+      <p style="font-size:13px; color:#666; margin-bottom:15px;">調査対象の自治体名を入力して検索するか、<br>現在地から直接設定してください。</p>
+      
+      <div style="display:flex; justify-content:center; align-items:center; margin-bottom: 12px;">
+        <input type="text" id="city-input" class="input-field" style="margin-bottom:0; flex:1;" placeholder="例：加古川市">
+        <button id="search-city-btn" class="btn" style="width:auto; margin-top:0; margin-left:8px; background:#6c757d;">🔍 検索</button>
+      </div>
+      
+      <button id="use-current-location-btn" class="btn" style="background:#17a2b8; padding:10px; font-size:14px; margin-bottom:10px;">📍 現在地を中心に設定する</button>
+      
+      <div id="search-result" style="margin-top:12px; font-size:14px; font-weight:bold; color:#007bff; min-height:20px;"></div>
+      
+      <label class="dl-checkbox-label">
+        <input type="checkbox" id="dl-map-checkbox" checked> 
+        オフライン用に地図をダウンロードする
+      </label>
+
+      <button id="start-op-btn" class="btn" style="background:#007bff; margin-top:20px; padding:12px; font-size:15px;" disabled>設定して開始</button>
+    </div>
+  </div>
+
+  <!-- コントロールパネル -->
+  <div class="control-panel">
+    <div class="panel-header-row">
+      <h4>📁 設定・出力</h4>
+      <button id="open-settings-btn" title="設定を開く">⚙️</button>
+    </div>
+    <div class="file-input-group">
+      <label>1. 位置データ (.zip形式SHP)</label>
+      <input type="file" id="shp-file-input" accept=".zip">
+    </div>
+    <div class="file-input-group">
+      <label>2. 業務報告書フォルダ</label>
+      <input type="file" id="report-folder-input" webkitdirectory directory multiple>
+    </div>
+    <button id="bulk-link-btn" class="btn">🔄 一括紐づけ</button>
+    <div id="status-msg" style="margin-top: 6px; font-size: 11px; font-weight: bold;"></div>
+    <hr style="margin: 10px 0; border: 0; border-top: 1px solid #ccc;">
+    <button id="share-cloud-btn" class="btn">☁️ クラウドへ一括共有</button>
+    <button id="export-btn" class="btn">📥 ZIPをローカル保存 (未出力: 0件)</button>
+    <button id="clear-db-btn" class="btn">🗑 端末保存データを初期化</button>
+  </div>
+
+  <!-- 設定画面（モーダル） -->
+  <div id="settings-modal">
+    <div class="settings-content">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #ccc; padding-bottom:10px; margin-bottom:15px;">
+        <h3 style="margin:0; font-size:18px;">⚙️ 詳細設定</h3>
+        <div id="close-settings-btn" style="font-size:20px; cursor:pointer;">✖</div>
+      </div>
+      
+      <button id="settings-dl-map-btn" class="btn">📥 現在エリアの地図をダウンロード</button>
+      
+      <hr style="margin: 15px 0; border: 0; border-top: 1px solid #ccc;">
+
+      <label class="settings-row" style="margin-bottom: 0;">
+        <input type="checkbox" id="admin-toggle">管理者モード
+      </label>
+
+      <!-- 🔒 管理者モードがONの時だけ表示されるメニュー -->
+      <div class="admin-only-setting">
+        <div style="font-size:12px; color:#dc3545; font-weight:bold; margin-bottom:10px;">🔒 管理者専用メニュー</div>
+        <label class="settings-row" style="margin-bottom: 0; width: 100%;">
+          <input type="checkbox" id="text-size-toggle">文字を大きくする (シニアモード)
+        </label>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="map"></div>
+  <button id="add-pin-btn">➕ 新規</button>
+  <button id="gps-btn">📍 現在地</button>
+
+  <div id="info-panel">
+    <div class="panel-header">
+      <div class="close-btn" onclick="closePanel()">✖</div>
+      <h3 id="p-house-id" style="margin:0;">物件番号</h3>
+      <p id="p-address" style="margin:4px 0 0 0; font-size:12px; color:#666;">住所</p>
+    </div>
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab(0)">📄 基本情報</div>
+      <div class="tab" onclick="switchTab(1)">📚 前回報告書</div>
+      <div class="tab" onclick="switchTab(2)">📸 今回調査</div>
+    </div>
+    <div id="content-0" class="tab-content active"></div>
+    <div id="content-1" class="tab-content"></div>
+    <div id="content-2" class="tab-content"></div>
+  </div>
+
+  <script>
+    // ==========================================
+    // 🎤 音声認識イベントバインド処理
+    // ==========================================
+    function bindMicEvents(btn, input) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        btn.onclick = () => alert('お使いのブラウザは音声入力非対応です。\n(iOSの場合は設定やSiriの許可を確認してください)');
+        return;
+      }
+      let recognizing = false;
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'ja-JP';
+      recognition.interimResults = false;
+      recognition.continuous = false;
+
+      recognition.onstart = () => {
+        recognizing = true;
+        btn.innerText = '🔴';
+        btn.style.borderColor = 'red';
+        btn.style.background = '#ffeeba';
+      };
+      recognition.onresult = (e) => {
+        const transcript = e.results[0][0].transcript;
+        input.value += (input.value ? ' ' : '') + transcript;
+      };
+      recognition.onerror = (e) => {
+        console.error(e);
+        if(e.error !== 'no-speech') alert('音声入力エラー: ' + e.error);
+      };
+      recognition.onend = () => {
+        recognizing = false;
+        btn.innerText = '🎤';
+        btn.style.borderColor = '#ccc';
+        btn.style.background = '#fff';
+      };
+
+      btn.addEventListener('click', () => {
+        if (recognizing) {
+          recognition.stop();
+        } else {
+          try { recognition.start(); } catch(err){}
+        }
+      });
+    }
+
+    // ==========================================
+    // 🌟 自治体検索・GPS ＆ オフラインダウンロード処理
+    // ==========================================
+    const cityInput = document.getElementById('city-input');
+    const searchCityBtn = document.getElementById('search-city-btn');
+    const useCurrentLocationBtn = document.getElementById('use-current-location-btn');
+    const searchResult = document.getElementById('search-result');
+    const startOpBtn = document.getElementById('start-op-btn');
+    const opScreen = document.getElementById('op-screen');
+    const dlMapCheckbox = document.getElementById('dl-map-checkbox');
+    
+    let selectedLat = null, selectedLng = null, selectedCity = "";
+
+    searchCityBtn.addEventListener('click', async () => {
+      const query = cityInput.value.trim();
+      if(!query) return;
+      searchResult.style.color = '#555';
+      searchResult.innerText = "🔍 検索中...";
+      startOpBtn.disabled = true;
+
+      try {
+        const res = await fetch(`https://msearch.gsi.go.jp/address/search?q=${encodeURIComponent(query)}`);
+        if(!res.ok) throw new Error("HTTP Error");
+        const data = await res.json();
+        
+        if(data && data.length > 0) {
+          const best = data[0];
+          selectedLng = best.geometry.coordinates[0];
+          selectedLat = best.geometry.coordinates[1];
+          selectedCity = best.properties.title;
+          
+          searchResult.style.color = '#28a745';
+          searchResult.innerText = `✅ ${selectedCity} を設定`;
+          startOpBtn.disabled = false;
+        } else {
+          throw new Error("Not found");
+        }
+      } catch(e) {
+        const cb = 'jsonp_' + Date.now();
+        window[cb] = function(data) {
+          delete window[cb];
+          const s = document.getElementById(cb);
+          if(s) document.body.removeChild(s);
+          
+          if(data && data.length > 0) {
+            selectedLat = parseFloat(data[0].lat);
+            selectedLng = parseFloat(data[0].lon);
+            selectedCity = data[0].display_name.split(',')[0];
+            
+            searchResult.style.color = '#28a745';
+            searchResult.innerText = `✅ ${selectedCity} を設定`;
+            startOpBtn.disabled = false;
+          } else {
+            searchResult.style.color = '#dc3545';
+            searchResult.innerText = "❌ 見つかりませんでした";
+          }
+        };
+
+        const script = document.createElement('script');
+        script.id = cb;
+        script.src = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&json_callback=${cb}`;
+        script.onerror = function() {
+          delete window[cb];
+          document.body.removeChild(script);
+          searchResult.style.color = '#dc3545';
+          searchResult.innerText = "❌ 検索に失敗しました(通信エラー)";
+        };
+        document.body.appendChild(script);
+      }
+    });
+
+    useCurrentLocationBtn.addEventListener('click', () => {
+      if (!navigator.geolocation) {
+        searchResult.style.color = '#dc3545';
+        searchResult.innerText = "❌ GPS非対応のブラウザです";
+        return;
+      }
+      searchResult.style.color = '#555';
+      searchResult.innerText = "📍 現在地を取得中...";
+      startOpBtn.disabled = true;
+      
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          selectedLat = pos.coords.latitude;
+          selectedLng = pos.coords.longitude;
+          selectedCity = "現在地周辺";
+          
+          searchResult.style.color = '#28a745';
+          searchResult.innerText = `✅ ${selectedCity} を設定`;
+          startOpBtn.disabled = false;
+        },
+        err => {
+          searchResult.style.color = '#dc3545';
+          searchResult.innerText = "❌ 現在地が取得できませんでした\n(iPadの設定>位置情報を確認してください)";
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    });
+
+    let toastTimeout;
+    function showToast(msg, duration = 5000) {
+      const toast = document.getElementById('toast');
+      toast.innerText = msg;
+      toast.classList.add('show');
+      if(toastTimeout) clearTimeout(toastTimeout);
+      if(duration > 0) {
+        toastTimeout = setTimeout(() => toast.classList.remove('show'), duration);
+      }
+    }
+
+    function startBackgroundDownload(lat, lng) {
+      showToast('📥 調査エリアの地図をバックグラウンドでダウンロードしています...', 0);
+
+      const workerCode = `
+        self.onmessage = async function(e) {
+          const { lat, lng } = e.data;
+          const zoomLevels = [14, 15, 16, 17]; 
+          const offset = 0.08; 
+          
+          function lon2tile(lon,zoom) { return (Math.floor((lon+180)/360*Math.pow(2,zoom))); }
+          function lat2tile(lat,zoom) { return (Math.floor((1-Math.log(Math.tan(lat*Math.PI/180) + 1/Math.cos(lat*Math.PI/180))/Math.PI)/2 *Math.pow(2,zoom))); }
+
+          const urls = [];
+          zoomLevels.forEach(z => {
+            const xMin = lon2tile(lng - offset, z), xMax = lon2tile(lng + offset, z);
+            const yMin = lat2tile(lat + offset, z), yMax = lat2tile(lat - offset, z);
+            for(let x=xMin; x<=xMax; x++) {
+              for(let y=yMin; y<=yMax; y++) {
+                urls.push(\`https://cyberjapandata.gsi.go.jp/xyz/pale/\${z}/\${x}/\${y}.png\`);
+              }
+            }
+          });
+
+          try {
+            const cache = await caches.open('gsi-tiles-cache');
+            for(const url of urls) {
+              const res = await caches.match(url);
+              if(!res) {
+                const fetchRes = await fetch(url);
+                if(fetchRes.ok) await cache.put(url, fetchRes);
+              }
+            }
+            self.postMessage({ type: 'done' });
+          } catch(err) { }
+        };
+      `;
+      const blob = new Blob([workerCode], {type: 'application/javascript'});
+      const worker = new Worker(URL.createObjectURL(blob));
+      worker.postMessage({ lat, lng });
+      worker.onmessage = (e) => {
+        if (e.data.type === 'done') {
+          showToast('✅ 地図の事前ダウンロードが完了しました。オフラインでも表示されます。', 6000);
+        }
+      };
+    }
+
+    // ==========================================
+    // 🌍 Leaflet完全オフラインキャッシュ化 (カスタムレイヤー)
+    // ==========================================
+    L.TileLayer.Cached = L.TileLayer.extend({
+      createTile: function (coords, done) {
+        const tile = document.createElement('img');
+        const url = this.getTileUrl(coords);
+        tile.alt = '';
+        
+        caches.match(url).then(res => {
+          if (res) {
+            res.blob().then(blob => {
+              tile.src = URL.createObjectURL(blob);
+              done(null, tile);
+            });
+          } else {
+            fetch(url).then(r => {
+              if (r.ok) caches.open('gsi-tiles-cache').then(cache => cache.put(url, r.clone()));
+              return r.blob();
+            }).then(blob => {
+              tile.src = URL.createObjectURL(blob);
+              done(null, tile);
+            }).catch(err => done(err, tile));
+          }
+        });
+        return tile;
+      }
+    });
+    L.tileLayer.cached = function (url, options) { return new L.TileLayer.Cached(url, options); };
+
+    const map = L.map('map', { maxZoom: 22 });
+    L.tileLayer.cached('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', { 
+      attribution: '地理院タイル', maxNativeZoom: 18, maxZoom: 22
+    }).addTo(map);
+
+    let loadedGeoJsonLayer = L.featureGroup().addTo(map);
+
+    // 🚀 OP画面の初期化・スキップ判定
+    const savedArea = localStorage.getItem('selectedArea');
+    if (savedArea) {
+      const area = JSON.parse(savedArea);
+      opScreen.style.display = 'none';
+      map.setView([area.lat, area.lng], 14);
+    } else {
+      map.setView([35.689, 139.691], 5);
+    }
+
+    startOpBtn.addEventListener('click', () => {
+      localStorage.setItem('selectedArea', JSON.stringify({name: selectedCity, lat: selectedLat, lng: selectedLng}));
+      opScreen.style.display = 'none';
+      map.setView([selectedLat, selectedLng], 14);
+      
+      if (dlMapCheckbox.checked) {
+        startBackgroundDownload(selectedLat, selectedLng);
+      }
+    });
+
+    // ==========================================
+    // ⚙️ 設定画面 ＆ 管理者モード処理
+    // ==========================================
+    const ADMIN_PASSWORD = "123"; // ★ここに任意のパスワードを設定してください
+
+    const settingsModal = document.getElementById('settings-modal');
+    document.getElementById('open-settings-btn').addEventListener('click', () => settingsModal.style.display = 'flex');
+    document.getElementById('close-settings-btn').addEventListener('click', () => settingsModal.style.display = 'none');
+    
+    document.getElementById('settings-dl-map-btn').addEventListener('click', () => {
+      const areaStr = localStorage.getItem('selectedArea');
+      if (areaStr) {
+        const area = JSON.parse(areaStr);
+        startBackgroundDownload(area.lat, area.lng);
+        settingsModal.style.display = 'none';
+      } else {
+        alert("調査対象エリアが設定されていません。\n初期設定を行ってください。");
+      }
+    });
+
+    // 🌟 シニアモード（文字拡大）トグル
+    document.getElementById('text-size-toggle').addEventListener('change', (e) => {
+      if (e.target.checked) document.body.classList.add('large-text');
+      else document.body.classList.remove('large-text');
+    });
+
+    // 🌟 管理者モードトグル
+    const clearDbBtn = document.getElementById('clear-db-btn');
+    document.getElementById('admin-toggle').addEventListener('change', (e) => {
+      if (e.target.checked) {
+        const pass = prompt("管理者パスワードを入力してください:");
+        if (pass === ADMIN_PASSWORD) {
+          clearDbBtn.style.display = 'block';
+          document.body.classList.add('admin-mode'); 
+          alert("管理者モードが有効になりました。\n初期化ボタン・シニアモード設定・所見行の削除機能が利用可能です。");
+        } else {
+          alert("パスワードが違います。");
+          e.target.checked = false;
+        }
+      } else {
+        clearDbBtn.style.display = 'none';
+        document.body.classList.remove('admin-mode');
+      }
+    });
+
+    // ==========================================
+    // 🌍 基本システム処理（📑 Excel画像並び替え強化版）
+    // ==========================================
+    function compressImage(srcData, maxSize = 1024) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          const cvs = document.createElement('canvas');
+          let w = img.width, h = img.height;
+          if (w > h ? w > maxSize : h > maxSize) { if (w > h) { h *= maxSize / w; w = maxSize; } else { w *= maxSize / h; h = maxSize; } }
+          cvs.width = w; cvs.height = h;
+          cvs.getContext('2d').drawImage(img, 0, 0, w, h);
+          resolve(cvs.toDataURL('image/jpeg', 0.6)); 
+        };
+        img.src = srcData;
+      });
+    }
+
+    const DB_NAME = "AkiyaSurveyDB", STORE_NAME = "surveys";
+    let db;
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = e => e.target.result.createObjectStore(STORE_NAME, { keyPath: "id", autoIncrement: true });
+    req.onsuccess = e => { db = e.target.result; updateRecordCount(); };
+
+    async function updateRecordCount() {
+      const tx = db.transaction(STORE_NAME, "readonly");
+      tx.objectStore(STORE_NAME).count().onsuccess = e => {
+        const count = e.target.result;
+        document.getElementById('share-cloud-btn').innerText = `☁️ クラウドへ一括共有 (${count}件)`;
+        document.getElementById('export-btn').innerText = `📥 ZIPをローカル保存 (${count}件)`;
+      };
+    }
+
+    let reportDataMap = {}, currentSelectedHouse = null, currentNewPhotos = {};
+
+    const getPinIcon = color => L.divIcon({
+      className: 'custom-pin',
+      html: `<div style="background:${color}; width:22px; height:22px; border-radius:50%; border:2px solid white; box-shadow:0 2px 4px rgba(0,0,0,0.4);"></div>`,
+      iconSize: [26, 26], iconAnchor: [13, 13]
+    });
+
+    document.getElementById('shp-file-input').addEventListener('change', e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      document.getElementById('status-msg').innerHTML = "<span style='color:#007bff;'>⏳ 読み込み中...</span>";
+      
+      const reader = new FileReader();
+      reader.onload = ev => {
+        shp(ev.target.result).then(geojson => {
+          loadedGeoJsonLayer.clearLayers();
+          const layer = L.geoJSON(geojson, {
+            pointToLayer: (f, latlng) => L.marker(latlng, { icon: getPinIcon('#007bff') }),
+            style: () => ({ color: '#007bff', weight: 2, fillColor: '#007bff', fillOpacity: 0.5 }),
+            onEachFeature: (feature, l) => {
+              const props = feature.properties;
+              const targetKey = Object.keys(props).find(k => k.includes('物件')) || 'house_id';
+              const houseId = String(props[targetKey] || props.ID || props.name || "名称不明").replace(/ /g, ' ').trim();
+              l.houseId = houseId;
+              l.on('click', () => openPanel(houseId, props, reportDataMap[houseId] || null));
+            }
+          });
+          loadedGeoJsonLayer.addLayer(layer);
+          map.fitBounds(loadedGeoJsonLayer.getBounds());
+          document.getElementById('status-msg').innerHTML = "<span style='color:#28a745;'>✅ SHP表示完了</span>";
+        }).catch(() => alert("SHP解凍エラー"));
+      };
+      reader.readAsArrayBuffer(file);
+    });
+
+    document.getElementById('report-folder-input').addEventListener('change', async e => {
+      const files = e.target.files;
+      if (!files.length) return;
+      document.getElementById('status-msg').innerHTML = "<span style='color:#007bff;'>⏳ 報告書解析中...</span>";
+      reportDataMap = {};
+      let count = 0;
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+          try {
+            const houseId = file.name.replace(/\.xlsx?$/i, '').trim();
+            const buf = await file.arrayBuffer();
+            const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+            
+            let sheetList = [];
+            wb.SheetNames.forEach(name => {
+              const match = name.replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xfee0)).match(/\d+/);
+              if (match) sheetList.push({ name: name, num: parseInt(match[0], 10) });
+            });
+            sheetList.sort((a, b) => b.num - a.num);
+            
+            let latestSheet = wb.SheetNames[wb.SheetNames.length - 1]; 
+            let prevSheet = latestSheet;
+            if (sheetList.length > 0) {
+              latestSheet = sheetList[0].name; 
+              prevSheet = sheetList.length > 1 ? sheetList[1].name : sheetList[0].name; 
+            }
+
+            const rows = XLSX.utils.sheet_to_json(wb.Sheets[prevSheet], { header: 1 });
+            let date = "日付不明", inv = "", note = "";
+            
+            for (let r = 0; r < Math.min(rows.length, 30); r++) {
+              if (!rows[r]) continue;
+              for (let c = 0; c < rows[r].length; c++) {
+                const val = String(rows[r][c] || "").replace(/\s+/g, '');
+                if (val.includes('調査日')) {
+                  let foundDates = [];
+                  for (let k = c + 1; k < rows[r].length; k++) {
+                    if (rows[r][k]) {
+                      let d = String(rows[r][k]).replace(/〈今回〉|<今回>|（今回）|\(今回\)|〈前回〉|<前回>|（前回）|\(前回\)/g, '').trim();
+                      if (/\d/.test(d)) foundDates.push(d);
+                    }
+                  }
+                  if (foundDates.length > 0) date = foundDates[foundDates.length - 1];
+                }
+                if (val === '調査者') {
+                  let foundInvs = [];
+                  for (let k = c + 1; k < rows[r].length; k++) {
+                    if (rows[r][k] && String(rows[r][k]).trim() !== '') foundInvs.push(String(rows[r][k]).trim());
+                  }
+                  if (foundInvs.length > 0) inv = foundInvs[foundInvs.length - 1];
+                }
+                if (val === '所見' || val.includes('改善必要事項')) {
+                  let foundNotes = [];
+                  for (let k = c + 1; k < rows[r].length; k++) {
+                    if (rows[r][k] && String(rows[r][k]).trim() !== '') foundNotes.push(String(rows[r][k]).trim());
+                  }
+                  if (foundNotes.length > 0) note = foundNotes[foundNotes.length - 1];
+                }
+              }
+            }
+
+            let images = [];
+            try {
+              const zip = await JSZip.loadAsync(buf);
+              const readText = async (path) => zip.file(path) ? await zip.file(path).async("text") : "";
+              const wbXml = await readText("xl/workbook.xml");
+              const wbRels = await readText("xl/_rels/workbook.xml.rels");
+
+              if (wbXml && wbRels) {
+                let rId = null;
+                const sheetRegex = new RegExp(`<sheet[^>]*name="${latestSheet.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*r:id="([^"]+)"`, "i");
+                let m = sheetRegex.exec(wbXml);
+                if (!m) {
+                  const sheetRegexAlt = new RegExp(`<sheet[^>]*r:id="([^"]+)"[^>]*name="${latestSheet.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`, "i");
+                  m = sheetRegexAlt.exec(wbXml);
+                }
+                if (m) rId = m[1];
+
+                let sheetTarget = null;
+                if (rId) {
+                  const relRegex = new RegExp(`Id="${rId}"[^>]*Target="([^"]+)"`, "i");
+                  let rm = relRegex.exec(wbRels);
+                  if (!rm) {
+                    const relRegexAlt = new RegExp(`Target="([^"]+)"[^>]*Id="${rId}"`, "i");
+                    rm = relRegexAlt.exec(wbRels);
+                  }
+                  if (rm) sheetTarget = rm[1];
+                }
+
+                if (sheetTarget) {
+                  const sheetFileName = sheetTarget.split('/').pop();
+                  const sheetRelsXml = await readText(`xl/worksheets/_rels/${sheetFileName}.rels`);
+                  let drawingTargets = [];
+                  const drMatches = sheetRelsXml.matchAll(/Target="([^"]*drawing[^"]*)"/gi);
+                  for (const dm of drMatches) drawingTargets.push(dm[1]);
+
+                  let imgPaths = [];
+                  for (const dt of drawingTargets) {
+                    const drFileName = dt.split('/').pop();
+                    
+                    // 🌟 Excel内の画像位置（行番号）を解析して並び替えるロジック
+                    const drXml = await readText(`xl/drawings/${drFileName}`);
+                    const drRelsXml = await readText(`xl/drawings/_rels/${drFileName}.rels`);
+                    
+                    if (drXml && drRelsXml) {
+                      const relMap = {};
+                      const relMatches1 = drRelsXml.matchAll(/Id="([^"]+)"[^>]*Target="([^"]+)"/gi);
+                      for (const rm of relMatches1) relMap[rm[1]] = rm[2];
+                      const relMatches2 = drRelsXml.matchAll(/Target="([^"]+)"[^>]*Id="([^"]+)"/gi);
+                      for (const rm of relMatches2) relMap[rm[2]] = rm[1];
+
+                      const anchors = drXml.split(/<[a-zA-Z0-9]*?:?twoCellAnchor|<[a-zA-Z0-9]*?:?oneCellAnchor/i);
+                      const posList = [];
+                      for (let k = 1; k < anchors.length; k++) {
+                        const block = anchors[k];
+                        const rowMatch = block.match(/<[a-zA-Z0-9]*?:?row>(\d+)<\/[a-zA-Z0-9]*?:?row>/i);
+                        const row = rowMatch ? parseInt(rowMatch[1], 10) : 0;
+                        const colMatch = block.match(/<[a-zA-Z0-9]*?:?col>(\d+)<\/[a-zA-Z0-9]*?:?col>/i);
+                        const col = colMatch ? parseInt(colMatch[1], 10) : 0;
+                        const embedMatch = block.match(/embed="([^"]+)"/i);
+                        const rId = embedMatch ? embedMatch[1] : null;
+                        if (rId) posList.push({ rId, row, col });
+                      }
+                      
+                      // 行番号（縦）でソート。同じ高さなら列番号（横）でソート
+                      posList.sort((a, b) => a.row !== b.row ? a.row - b.row : a.col - b.col);
+                      
+                      for (const item of posList) {
+                        const target = relMap[item.rId];
+                        if (target && target.includes('media/')) {
+                          imgPaths.push(`xl/media/${target.split('/').pop()}`);
+                        }
+                      }
+                    } else if (drRelsXml) {
+                      // fallback
+                      const imgMatches = drRelsXml.matchAll(/Target="([^"]*media\/[^"]*)"/gi);
+                      for (const im of imgMatches) imgPaths.push(`xl/media/${im[1].split('/').pop()}`);
+                    }
+                  }
+
+                  // 抽出した画像パスから重複を削除して画像化
+                  const uniquePaths = [...new Set(imgPaths)];
+                  for (const p of uniquePaths) {
+                    const imgFile = zip.file(p);
+                    if (imgFile) {
+                      const ext = p.split('.').pop().toLowerCase();
+                      if (['jpg', 'jpeg', 'png'].includes(ext)) {
+                        const b64 = await compressImage(`data:image/${ext==='png'?'png':'jpeg'};base64,${await imgFile.async('base64')}`, 800);
+                        images.push(b64);
+                      }
+                    }
+                  }
+                }
+              }
+            } catch(err) {}
+
+            reportDataMap[houseId] = { 
+                history: [{ title: prevSheet, date: date, investigator: inv, note: note }], 
+                images: images,
+                latestSheetName: latestSheet
+            };
+            count++;
+          } catch(err) {}
+        }
+      }
+      document.getElementById('status-msg').innerHTML = `<span style='color:#28a745;'>✅ ${count}件 読込完了</span>`;
+    });
+
+    document.getElementById('bulk-link-btn').addEventListener('click', () => {
+      let match = 0, unmatch = 0;
+      loadedGeoJsonLayer.eachLayer(g => {
+        const checkLayer = l => {
+          if (String(l.houseId).startsWith("新規_")) return;
+          if (reportDataMap[l.houseId]) { match++; if (l.setIcon) l.setIcon(getPinIcon('#28a745')); }
+          else { unmatch++; if (l.setIcon) l.setIcon(getPinIcon('#dc3545')); }
+        };
+        g.eachLayer ? g.eachLayer(checkLayer) : checkLayer(g);
+      });
+      document.getElementById('status-msg').innerHTML = `<span style="color:#28a745;">🟢 報告書あり: ${match}件</span><br><span style="color:#dc3545;">🔴 報告書なし: ${unmatch}件</span>`;
+    });
+
+    function openPanel(houseId, shpProps, reportProps) {
+      currentSelectedHouse = { house_id: houseId };
+      currentNewPhotos = {};
+      document.getElementById('p-house-id').innerText = houseId;
+      document.getElementById('p-address').innerText = (shpProps && (shpProps.address || shpProps['住所'] || shpProps['所在地'])) || "住所情報なし";
+
+      let h0 = '<table class="excel-table">';
+      if (shpProps) {
+        for (let k in shpProps) if (!["OBJECTID","Shape_Area","Shape_Leng"].includes(k)) h0 += `<tr><th>${k}</th><td>${shpProps[k] ?? ''}</td></tr>`;
+      }
+      document.getElementById('content-0').innerHTML = h0 + '</table>';
+
+      let h1 = '';
+      if (reportProps?.history?.length) {
+        reportProps.history.forEach((h, i) => {
+          h1 += `<div style="border:1px solid #ddd; padding:10px; border-radius:6px; margin-bottom:10px;">
+            <h5 style="margin:0 0 8px 0; color:#007bff;">${h.title}</h5>
+            <label class="info-label">調査日</label><input type="text" id="hist-date-${i}" class="input-field" value="${h.date}">
+            <label class="info-label">担当者</label><input type="text" id="hist-inv-${i}" class="input-field" value="${h.investigator}">
+            <label class="info-label">所見</label><textarea id="hist-note-${i}" class="input-field" rows="3">${h.note}</textarea>
+            <button class="btn" style="background:#17a2b8;" onclick="saveHistory('${houseId}', '${h.title}', ${i})">🔄 このデータを修正保存</button>
+          </div>`;
+        });
+      } else h1 = '<p style="color:#888;">報告書データなし</p>';
+      document.getElementById('content-1').innerHTML = h1;
+
+      let h2 = `<label class="info-label">調査区分</label><input type="text" id="input-survey-title" class="input-field" value="${reportProps?.latestSheetName || '今回調査'}">`;
+      const imgs = reportProps?.images || [];
+      if (imgs.length) {
+        h2 += `<div class="info-label" style="margin-bottom:8px;">📋 最新報告書写真と新旧比較</div>`;
+        imgs.forEach((img, idx) => {
+          const n = idx + 1;
+          h2 += `<div class="photo-pair">
+            <div class="info-label">【写真 ${n}】 過去画像</div>
+            <img src="${img}" class="photo-img">
+            <label class="camera-btn" style="background:#28a745;">📸 写真 ${n} の今回分を撮影
+              <input type="file" accept="image/*" capture="environment" class="camera-input" onchange="handlePhoto(event, '${n}')">
+            </label>
+            <div id="pbox-${n}" style="display:none; margin-top:8px; text-align:center;">
+              <img id="pimg-${n}" class="photo-img">
+            </div>
+          </div>`;
+        });
+      }
+      
+      h2 += `<div class="photo-pair" style="border-style:dashed;">
+        <div class="info-label">➕ 新規・追加写真</div>
+        <label class="camera-btn" style="background:#6c757d;">📸 写真撮影
+          <input type="file" accept="image/*" capture="environment" class="camera-input" onchange="handlePhoto(event, '追加')">
+        </label>
+        <div id="pbox-追加" style="display:none; margin-top:8px; text-align:center;"><img id="pimg-追加" class="photo-img"></div>
+      </div>
+      <label class="info-label">調査者</label><input type="text" id="input-inv" class="input-field" placeholder="氏名">
+      
+      <label class="info-label">所見</label>
+      <div id="note-list-container">
+        <div class="note-item-row" style="display:flex; margin-bottom:8px; align-items:center;">
+          <span style="margin-right:6px; font-weight:bold;">・</span>
+          <input type="text" class="input-field note-input-val" style="margin-bottom:0; flex:1;" placeholder="所見を音声または手入力">
+          <button class="btn mic-btn" style="width:auto; margin-top:0; margin-left:8px; background:#fff; border:1px solid #ccc; color:#333; font-size:16px; padding:6px 12px; display:flex; align-items:center; justify-content:center;">🎤</button>
+          <button class="remove-note-btn" onclick="this.parentElement.remove()" title="行を削除">✖</button>
+        </div>
+      </div>
+      <button id="add-note-row-btn" class="btn" style="background:#6c757d; margin-bottom:15px; font-size:12px; padding:6px;">➕ 項目を追加</button>
+
+      <button class="save-btn" onclick="saveNewSurvey()">💾 端末内に今回調査を保存</button>`;
+      
+      document.getElementById('content-2').innerHTML = h2;
+      switchTab(0);
+      document.getElementById('info-panel').style.bottom = "0";
+
+      document.getElementById('add-note-row-btn').addEventListener('click', () => {
+        const container = document.getElementById('note-list-container');
+        const row = document.createElement('div');
+        row.className = 'note-item-row';
+        row.style.cssText = 'display:flex; margin-bottom:8px; align-items:center;';
+        row.innerHTML = `
+          <span style="margin-right:6px; font-weight:bold;">・</span>
+          <input type="text" class="input-field note-input-val" style="margin-bottom:0; flex:1;" placeholder="所見を音声または手入力">
+          <button class="btn mic-btn" style="width:auto; margin-top:0; margin-left:8px; background:#fff; border:1px solid #ccc; color:#333; font-size:16px; padding:6px 12px; display:flex; align-items:center; justify-content:center;">🎤</button>
+          <button class="remove-note-btn" onclick="this.parentElement.remove()" title="行を削除">✖</button>
+        `;
+        container.appendChild(row);
+        bindMicEvents(row.querySelector('.mic-btn'), row.querySelector('.note-input-val'));
+      });
+
+      document.querySelectorAll('.note-item-row').forEach(row => {
+        bindMicEvents(row.querySelector('.mic-btn'), row.querySelector('.note-input-val'));
+      });
+    }
+
+    function switchTab(i) {
+      document.querySelectorAll('.tab').forEach((t, idx) => t.classList.toggle('active', idx === i));
+      document.querySelectorAll('.tab-content').forEach((c, idx) => c.classList.toggle('active', idx === i));
+    }
+    function closePanel() { document.getElementById('info-panel').style.bottom = "-100%"; }
+
+    function handlePhoto(e, num) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async ev => {
+        const b64 = await compressImage(ev.target.result, 1280);
+        currentNewPhotos[num] = b64;
+        document.getElementById(`pimg-${num}`).src = b64;
+        document.getElementById(`pbox-${num}`).style.display = "block";
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function saveHistory(houseId, title, i) {
+      const data = {
+        house_id: houseId, survey_title: title,
+        date: document.getElementById(`hist-date-${i}`).value,
+        investigator: document.getElementById(`hist-inv-${i}`).value,
+        note: document.getElementById(`hist-note-${i}`).value,
+        photos: {}, type: "update"
+      };
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      tx.objectStore(STORE_NAME).add(data);
+      tx.oncomplete = () => { alert("✅ 修正保存しました"); updateRecordCount(); };
+    }
+
+    function saveNewSurvey() {
+      const inv = document.getElementById('input-inv').value;
+      
+      const noteInputs = document.querySelectorAll('.note-input-val');
+      const notes = [];
+      noteInputs.forEach(inp => {
+        const val = inp.value.trim();
+        if (val !== '') notes.push('・' + val);
+      });
+      const note = notes.join('\n');
+
+      if (!inv && !note) return alert("調査者または所見を入力してください");
+
+      const data = {
+        house_id: currentSelectedHouse.house_id,
+        survey_title: document.getElementById('input-survey-title').value,
+        investigator: inv, note: note, date: new Date().toLocaleString("ja-JP"),
+        photos: currentNewPhotos, type: "new"
+      };
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      tx.objectStore(STORE_NAME).add(data);
+      tx.oncomplete = () => { alert("✅ 今回調査を保存しました"); closePanel(); updateRecordCount(); };
+    }
+
+    async function generateSurveyZip() {
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_NAME, "readonly");
+        tx.objectStore(STORE_NAME).getAll().onsuccess = async e => {
+          const records = e.target.result;
+          if (!records.length) return resolve(null);
+
+          const zip = new JSZip(), rows = [];
+          records.forEach((r, i) => {
+            let pNames = [];
+            if (r.photos) {
+              for (let num in r.photos) {
+                const fname = `${r.house_id}_写真${num}_${i}.jpg`;
+                zip.file(fname, r.photos[num].split(',')[1], {base64: true});
+                pNames.push(fname);
+              }
+            }
+            rows.push({
+              "状態": r.type === "update" ? "履歴修正" : "新規追加", 
+              "処理日時": r.date,
+              "物件番号": r.house_id, 
+              "調査区分": r.survey_title || "", 
+              "調査者": r.investigator || "",
+              "所見": r.note || "", 
+              "写真ファイル名": pNames.join(",")
+            });
+          });
+
+          const ws = XLSX.utils.json_to_sheet(rows), wb = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(wb, ws, "現場更新データ");
+          zip.file("現場更新データまとめ.xlsx", XLSX.write(wb, { bookType: 'xlsx', type: 'array' }));
+
+          const blob = await zip.generateAsync({ type: "blob" });
+          const fileName = `空き家調査_現場更新分_${new Date().toISOString().split('T')[0]}.zip`;
+          resolve({ blob, fileName });
+        };
+      });
+    }
+
+    document.getElementById('share-cloud-btn').addEventListener('click', async () => {
+      const zipData = await generateSurveyZip();
+      if (!zipData) return alert("送信する現場データがありません。");
+
+      const file = new File([zipData.blob], zipData.fileName, { type: "application/zip" });
+      const nowStr = new Date().toLocaleString("ja-JP");
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({
+            title: '空き家調査_現場データ共有',
+            text: `【送信日時: ${nowStr}】\n現場で登録された最新調査データと写真です。`,
+            files: [file]
+          });
+        } catch (err) {
+          if (err.name !== 'AbortError') alert("共有中にエラーが発生しました: " + err.message);
+        }
+      } else {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(zipData.blob);
+        a.download = zipData.fileName;
+        a.click();
+        alert("端末の直接共有機能が未対応のため、通常のダウンロードを実行しました。ファイルアプリからOneDrive等へ保存してください。");
+      }
+    });
+
+    document.getElementById('export-btn').addEventListener('click', async () => {
+      const zipData = await generateSurveyZip();
+      if (!zipData) return alert("出力データがありません");
+
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(zipData.blob);
+      a.download = zipData.fileName;
+      a.click();
+    });
+
+    // 🗑 完全初期化 (地図キャッシュもすべて破棄してOP画面へリセット)
+    document.getElementById('clear-db-btn').addEventListener('click', () => {
+      if (confirm("⚠️ 注意: 端末内の未出力データおよび地図のキャッシュをすべて削除します。\nよろしいですか？")) {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        tx.objectStore(STORE_NAME).clear();
+        tx.oncomplete = async () => { 
+          localStorage.removeItem('selectedArea'); 
+          try { await caches.delete('gsi-tiles-cache'); } catch(e) {} 
+          alert("初期化しました。アプリを再読み込みします。"); 
+          location.reload();
+        };
+      }
+    });
+
+    let watchId = null, gpsMarker = null, accuracyCircle = null;
+    document.getElementById('gps-btn').addEventListener('click', () => {
+      if (!navigator.geolocation) return alert("GPS非対応のブラウザです。");
+      const btn = document.getElementById('gps-btn');
+
+      if (watchId) {
+        navigator.geolocation.clearWatch(watchId); 
+        watchId = null;
+        btn.innerText = "📍 現在地"; 
+        btn.style.background = "#007bff";
+        if (gpsMarker) map.removeLayer(gpsMarker); 
+        if (accuracyCircle) map.removeLayer(accuracyCircle);
+        gpsMarker = accuracyCircle = null;
+      } else {
+        btn.innerText = "🔄 追従中"; 
+        btn.style.background = "#28a745";
+        
+        watchId = navigator.geolocation.watchPosition(
+          pos => {
+            const lat = pos.coords.latitude, lng = pos.coords.longitude, acc = pos.coords.accuracy;
+            if (!gpsMarker) map.setView([lat, lng], 17);
+            if (gpsMarker) { 
+              gpsMarker.setLatLng([lat, lng]); 
+              accuracyCircle.setLatLng([lat, lng]).setRadius(acc); 
+            } else {
+              accuracyCircle = L.circle([lat, lng], { radius: acc, color: '#007bff', fillColor: '#007bff', fillOpacity: 0.1, weight: 1 }).addTo(map);
+              gpsMarker = L.circleMarker([lat, lng], { radius: 8, fillColor: "#007bff", color: "#fff", weight: 2, fillOpacity: 0.9 }).addTo(map);
+            }
+          }, 
+          err => {
+            let msg = "GPSエラー: ";
+            if (err.code === 1) msg += "位置情報の利用が許可されていません。\n(iPadの設定 > プライバシー > 位置情報サービス を確認してください)";
+            else if (err.code === 2) msg += "現在地が取得できません。(電波状況を確認してください)";
+            else if (err.code === 3) msg += "タイムアウトしました。";
+            else msg += err.message;
+            alert(msg);
+            
+            btn.innerText = "📍 現在地"; 
+            btn.style.background = "#007bff";
+            if (watchId) navigator.geolocation.clearWatch(watchId); 
+            watchId = null;
+          }, 
+          { enableHighAccuracy: true, maximumAge: 0 } 
+        );
+      }
+    });
+
+    document.getElementById('add-pin-btn').addEventListener('click', () => {
+      if (!navigator.geolocation) return alert("GPS非対応のブラウザです。");
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          const lat = pos.coords.latitude, lng = pos.coords.longitude;
+          const newId = "新規_" + String(Date.now()).slice(-5);
+          const marker = L.marker([lat, lng], { icon: getPinIcon('#ff9800') });
+          marker.houseId = newId;
+          marker.on('click', () => openPanel(newId, { "物件番号": newId, "住所": "新規登録物件", "緯度": lat, "経度": lng }, null));
+          loadedGeoJsonLayer.addLayer(marker);
+          map.setView([lat, lng], 18);
+          alert("現在地に新しいピンを追加しました");
+        }, 
+        err => {
+          let msg = "ピン追加エラー: ";
+          if (err.code === 1) msg += "位置情報の利用が許可されていません。";
+          else if (err.code === 2) msg += "現在地が取得できません。";
+          else if (err.code === 3) msg += "タイムアウトしました。";
+          alert(msg);
+        }, 
+        { enableHighAccuracy: true }
+      );
+    });
+  </script>
+</body>
+</html>
